@@ -1,4 +1,4 @@
-# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+# Ultralytics Actions 🚀, AGPL-3.0 License https://ultralytics.com/license
 
 name: "Ultralytics Actions"
 author: "Ultralytics"
@@ -59,34 +59,32 @@ inputs:
     description: "GitHub username for commits"
     required: false
     default: "UltralyticsAssistant"
-    # default: "github-actions[bot]"
   github_email:
     description: "GitHub email for commits"
     required: false
     default: "web@ultralytics.com"
-    # default: "41898282+github-actions[bot]@users.noreply.github.com"
 runs:
   using: "composite"
   steps:
-    - uses: astral-sh/setup-uv@v5
-      with:
-        enable-cache: false
+    - uses: astral-sh/setup-uv@v4
     - name: Install Dependencies
       # Note tomli required for codespell with pyproject.toml
-      # sudo env "PATH=$PATH" uv pip install --system git+https://github.com/ultralytics/actions@main codespell tomli
-      env:
-        INPUTS_SPELLING: ${{ inputs.spelling }}
+      # For debug:
+      #   python -m pip install --upgrade pip wheel
+      #   pip install -q git+https://github.com/ultralytics/actions@main codespell tomli
       run: |
         packages="ultralytics-actions"
-        if [ "$INPUTS_SPELLING" = "true" ]; then
+        if [ "${{ inputs.spelling }}" = "true" ]; then
           packages="$packages codespell tomli"
         fi
+
         # On macOS, don't use sudo as it can cause environment issues
         if [ "$(uname)" = "Darwin" ]; then
-          uv pip install --system --break-system-packages $packages
+          pip install -q $packages
         else
-          sudo env "PATH=$PATH" uv pip install --system --break-system-packages $packages
+          sudo env "PATH=$PATH" uv pip install --system $packages
         fi
+
         ultralytics-actions-info
       shell: bash
 
@@ -98,6 +96,7 @@ runs:
         repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         token: ${{ inputs.token }}
         ref: ${{ github.head_ref || github.ref }}
+        fetch-depth: 0
 
     # PR Summary -------------------------------------------------------------------------------------------------------
     - name: PR Summary
@@ -154,14 +153,25 @@ runs:
       run: |
         ultralytics-actions-update-markdown-code-blocks
         npm install --global prettier
-        npx prettier --write --list-different "**/*.{js,jsx,ts,tsx,css,less,scss,json,yml,yaml,html,vue,svelte}" '!**/*lock.{json,yaml,yml}' '!**/*.lock' '!**/model.json'
+        npx prettier --write "**/*.{js,jsx,ts,tsx,css,less,scss,json,yml,yaml,html,vue,svelte}" '!**/*lock.{json,yaml,yml}' '!**/*.lock' '!**/model.json'
         # Handle Markdown separately
-        find . -name "*.md" ! -path "*/docs/*" -exec npx prettier --write --list-different {} +
+        find . -name "*.md" ! -path "*/docs/*" -exec npx prettier --write {} +
         if [ -d "./docs" ]; then
-          find ./docs -name "*.md" ! -path "*/reference/*" -exec npx prettier --tab-width 4 --write --list-different {} +
+          find ./docs -name "*.md" ! -path "*/reference/*" -exec npx prettier --tab-width 4 --write {} +
         fi
       shell: bash
       continue-on-error: true
+
+    # - name: Fix MkDocs reference section changes
+    #   if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && (inputs.prettier == 'true' || inputs.markdown == 'true') && github.event.action != 'closed'
+    #   run: |
+    #     from pathlib import Path
+    #     for file in Path("./docs").rglob('*.md'):
+    #         content = file.read_text()
+    #         updated_content = content.replace(".\_","._")
+    #         file.write_text(updated_content)
+    #   shell: python
+    #   continue-on-error: true
 
     # Swift formatting -------------------------------------------------------------------------------------------------
     - name: Run Swift Formatter
@@ -178,8 +188,7 @@ runs:
       run: |
         codespell \
           --write-changes \
-          --uri-ignore-words-list * \
-          --ignore-words-list "RepResNet,Idenfy,WIT,Smoot,EHR,ROUGE,ALS,iTerm,Carmel,FPR,Hach,Calle,ore,COO,MOT,crate,nd,ned,strack,dota,ane,segway,fo,gool,winn,commend,bloc,nam,afterall,skelton,goin" \
+          --ignore-words-list "crate,nd,ned,strack,dota,ane,segway,fo,gool,winn,commend,bloc,nam,afterall,skelton,goin" \
           --skip "*.pt,*.pth,*.torchscript,*.onnx,*.tflite,*.pb,*.bin,*.param,*.mlmodel,*.engine,*.npy,*.data*,*.csv,*pnnx*,*venv*,*translat*,*lock*,__pycache__*,*.ico,*.jpg,*.png,*.mp4,*.mov,/runs,/.git,./docs/??/*.md,./docs/mkdocs_??.yml"
       shell: bash
       continue-on-error: true
@@ -201,12 +210,10 @@ runs:
     # Commit Changes ---------------------------------------------------------------------------------------------------
     - name: Commit and Push Changes
       if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.action != 'closed'
-      env:
-        GITHUB_USERNAME: ${{ inputs.github_username }}
-        GITHUB_EMAIL: ${{ inputs.github_email }}
       run: |
-        git config --global user.name "$GITHUB_USERNAME"
-        git config --global user.email "$GITHUB_EMAIL"
+        git config --global user.name "${{ inputs.github_username }}"
+        git config --global user.email "${{ inputs.github_email }}"
+        git pull origin ${{ github.head_ref || github.ref }}
         git add .
         git reset HEAD -- .github/workflows/  # workflow changes are not permitted with default token
         if ! git diff --staged --quiet; then
@@ -216,12 +223,12 @@ runs:
           echo "No changes to commit"
         fi
       shell: bash
-      continue-on-error: true
+      continue-on-error: false
 
     # Broken links -----------------------------------------------------------------------------------------------------
     - name: Broken Link Checker
       if: inputs.links == 'true' && github.event.action != 'closed'
-      uses: lycheeverse/lychee-action@v2.2.0
+      uses: lycheeverse/lychee-action@v2.1.0
       with:
         # Check all markdown and html files in repo. Ignores the following status codes to reduce false positives:
         #   - 403(OpenVINO, "forbidden")
